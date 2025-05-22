@@ -32,6 +32,7 @@
 | Description                          | Command                                      |
 |--------------------------------------|----------------------------------------------|
 | List services                        | `kubectl get services`                       |
+| List services                        | `kubectl get svc`                       |
 | Expose deployment as a service       | `kubectl expose deployment [NAME] --type=[TYPE] --port=[PORT]` |
 | Describe a service                   | `kubectl describe service [NAME]`            |
 | Delete a service                     | `kubectl delete service [NAME]`              |
@@ -75,6 +76,16 @@
 | Get resource by label                | `kubectl get pods -l [LABEL_KEY]=[VALUE]`    |
 | View resource YAML                   | `kubectl get [RESOURCE] [NAME] -o yaml`      |
 | Explain a resource                   | `kubectl explain [RESOURCE]`                 |
+
+## 🔎 Create Image to Pod
+| `kubectl run podName --image imageName:1.0 --port=80` |
+
+## Expose service port 
+| `kubectl expose pod podName --name=servicename --port=80` | 
+
+## Port forwading connect service to pod
+|  `kubectl port-forward service/serviceName 7080:80`
+
 
 ---
 
