@@ -1,237 +1,123 @@
+now give you a COMPLETE, STEP-BY-STEP implementation for a company internal lab where:
+
+✅ Kubernetes master is on Linux
+
+✅ Spring Boot app runs on Windows / another server
+
+✅ HTTP is used not HTTPS
+
+✅ NO ca.crt
+
+✅ SSL verification disabled (acceptable for internal lab)
+
+====
+
+
 Got it 👍
-**This is very common**, and it’s NOT a blocker.
+Below is a **COMPLETE, PRACTICAL, STEP-BY-STEP implementation** specifically for a **company internal lab** where you **intentionally use HTTP (not HTTPS)** and **no CA cert**.
 
-You have **3 correct production-grade options** when you don’t have `ca.crt`.
-I’ll explain **what’s happening**, then give you **exact commands**.
+⚠️ **Important upfront truth**
+Kubernetes **natively runs its API server on HTTPS (6443)**.
+👉 There is **NO official HTTP-only Kubernetes API**.
+
+So when people say *“use HTTP”* in internal labs, what they **actually do** is one of these:
+
+1. **Expose Kubernetes API via an internal HTTP reverse proxy**
+2. **Use kubectl proxy (HTTP)**
+3. **Use SSH tunnel + HTTP**
+4. **Use insecure kube-apiserver flags (NOT recommended even in lab)**
+
+For **company internal lab**, the **BEST & SAFE approach** is:
+
+> ✅ **kubectl proxy (HTTP)**
+
+This is **exactly meant for local / internal testing**.
 
 ---
 
-## 🔍 First: What is `ca.crt` and why it’s needed?
+# ✅ FINAL APPROACH (RECOMMENDED)
 
-Kubernetes API Server uses **HTTPS**.
-`ca.crt` is used by your Spring Boot app to:
+```
+Spring Boot App (Windows / Server)
+        |
+        |  HTTP (no SSL)
+        |
+kubectl proxy (Linux Master)
+        |
+        |  HTTPS (internal)
+        |
+Kubernetes API Server
+```
 
-> ✅ Verify that the Kubernetes Master is a trusted server
-> ❌ Prevent MITM (man-in-the-middle) attacks
+Spring Boot **never talks to HTTPS**
+👉 It only talks to **HTTP**
 
 ---
 
-# ✅ OPTION 1 (BEST & RECOMMENDED): Extract CA from kubeconfig
+# 1️⃣ PREREQUISITES
 
-If your **Kubernetes master is working**, then **CA already exists**.
+On **Linux Kubernetes master**:
 
-### 🔹 On Kubernetes Master (Linux)
+* kubectl installed
+* kubeconfig already working
+
+Test:
 
 ```bash
-kubectl config view --raw
+kubectl get nodes
 ```
 
-You’ll see something like:
+---
 
-```yaml
-certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...
-```
+# 2️⃣ START KUBECTL PROXY (HTTP)
 
-### 🔹 Extract `ca.crt`
+Run this on **Kubernetes master**:
 
 ```bash
-kubectl config view --raw --minify --flatten \
--o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
-| base64 --decode > ca.crt
+kubectl proxy \
+  --address='0.0.0.0' \
+  --port=8001 \
+  --accept-hosts='.*'
 ```
 
-✅ This creates `ca.crt`
-📌 Copy this file to your **Spring Boot server**
+✅ This exposes **HTTP API** on port **8001**
 
----
-
-# ✅ OPTION 2: CA is already on Master Node (Most Clusters)
-
-Check this path:
+Test locally:
 
 ```bash
-ls /etc/kubernetes/pki/
+curl http://localhost:8001/api
 ```
 
-You’ll see:
+---
 
-```
-ca.crt
-ca.key
-apiserver.crt
-apiserver.key
-```
+# 3️⃣ FIREWALL (IMPORTANT)
 
-### Copy CA only (safe)
+Allow port **8001** on Kubernetes master:
 
 ```bash
-scp /etc/kubernetes/pki/ca.crt user@springboot-server:/path/
+sudo ufw allow 8001
 ```
 
-⚠️ **Never copy `ca.key`**
-
----
-
-# ⚠️ OPTION 3 (TEMPORARY / NOT IDEAL): Disable TLS Verification
-
-⚠️ **Use only if you REALLY cannot get CA**
-❌ Not recommended for production internet
-✔ Acceptable for **internal secured network**
-
-### Spring Boot Config (Java Client)
-
-```java
-ApiClient client = ClientBuilder.standard()
-        .setBasePath("https://<MASTER_IP>:6443")
-        .setVerifyingSsl(false)   // ❌ disables TLS check
-        .setAuthentication(
-                new AccessTokenAuthentication("<TOKEN>")
-        )
-        .build();
-```
-
-📌 **Security Risk:** anyone spoofing master IP could intercept
-
----
-
-# 🔐 BEST PRACTICE DECISION TABLE
-
-| Situation             | What to do                          |
-| --------------------- | ----------------------------------- |
-| kubeconfig exists     | ✅ Extract CA (Option 1)             |
-| Control-plane access  | ✅ Copy `/etc/kubernetes/pki/ca.crt` |
-| Internal testing only | ⚠️ Disable SSL                      |
-| Public / cloud        | ❌ Never disable SSL                 |
-
----
-
-# 🧪 Verify CA Works (Before Spring Boot)
+or (CentOS/RHEL):
 
 ```bash
-curl --cacert ca.crt \
--H "Authorization: Bearer <TOKEN>" \
-https://<MASTER_IP>:6443/api/v1/namespaces
-```
-
-✔ If this works → Spring Boot WILL work
-
-============
-
-Perfect 👍
-Below is a **FULL STEP-BY-STEP JAVA IMPLEMENTATION** for **PRODUCTION** when:
-
-* Kubernetes master is on **Linux**
-* Spring Boot app is on **another machine (Windows / Server)**
-* You **do NOT have `ca.crt` initially**
-* You will **extract it properly**
-* You will use **Kubernetes Java Client (official)**
-
-No shortcuts. No theory gaps.
-
----
-
-# ✅ FINAL ARCHITECTURE
-
-```
-Spring Boot App
-   |
-   |  HTTPS + Bearer Token
-   ↓
-Kubernetes API Server (Master :6443)
+sudo firewall-cmd --add-port=8001/tcp --permanent
+sudo firewall-cmd --reload
 ```
 
 ---
 
-# STEP 1️⃣ – Extract CA Certificate (ONE TIME)
-
-Run on **Kubernetes master** (or any machine with kubeconfig):
+# 4️⃣ TEST FROM WINDOWS / OTHER SERVER
 
 ```bash
-kubectl config view --raw --minify --flatten \
--o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
-| base64 --decode > ca.crt
+curl http://<MASTER_IP>:8001/api
 ```
 
-📌 Copy `ca.crt` to your Spring Boot machine
-Example path:
-
-```
-C:\k8s\ca.crt   (Windows)
-```
+If you get JSON → ✅ WORKING
 
 ---
 
-# STEP 2️⃣ – Create Service Account (SECURE ACCESS)
-
-```bash
-kubectl create serviceaccount spring-app-sa -n default
-```
-
----
-
-# STEP 3️⃣ – Create RBAC (LIMITED PERMISSIONS)
-
-### `role.yaml`
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: spring-app-role
-rules:
-- apiGroups: [""]
-  resources: ["pods", "services"]
-  verbs: ["get", "list"]
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "update"]
-```
-
-```bash
-kubectl apply -f role.yaml
-```
-
----
-
-### `binding.yaml`
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: spring-app-binding
-subjects:
-- kind: ServiceAccount
-  name: spring-app-sa
-  namespace: default
-roleRef:
-  kind: ClusterRole
-  name: spring-app-role
-  apiGroup: rbac.authorization.k8s.io
-```
-
-```bash
-kubectl apply -f binding.yaml
-```
-
----
-
-# STEP 4️⃣ – Generate Token (NO SECRET FILES)
-
-```bash
-kubectl create token spring-app-sa
-```
-
-📌 Save token securely
-Example:
-
-```
-K8S_TOKEN=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
----
-
-# STEP 5️⃣ – Spring Boot Dependencies
+# 5️⃣ SPRING BOOT DEPENDENCY
 
 ### `pom.xml`
 
@@ -239,319 +125,171 @@ K8S_TOKEN=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
 <dependency>
     <groupId>io.kubernetes</groupId>
     <artifactId>client-java</artifactId>
-    <version>20.0.0</version>
+    <version>20.0.1</version>
 </dependency>
 ```
 
 ---
 
-# STEP 6️⃣ – application.yml (PRODUCTION SAFE)
+# 6️⃣ SPRING CONFIG (PURE HTTP, NO SSL, NO TOKEN)
 
-```yaml
-k8s:
-  master-url: https://192.168.1.50:6443
-  token: ${K8S_TOKEN}
-  ca-cert-path: C:/k8s/ca.crt
-```
-
-✔ Token comes from environment variable
-✔ No secrets in code
-
----
-
-# STEP 7️⃣ – Kubernetes Client Configuration (JAVA)
-
-### `KubernetesConfig.java`
+### `KubernetesClientConfig.java`
 
 ```java
-@Configuration
-public class KubernetesConfig {
+package com.example.k8s.config;
 
-    @Value("${k8s.master-url}")
-    private String masterUrl;
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.Configuration;
+import io.kubernetes.client.util.Config;
+import jakarta.annotation.PostConstruct;
+import org.springframework.context.annotation.Configuration as SpringConfig;
 
-    @Value("${k8s.token}")
-    private String token;
+@SpringConfig
+public class KubernetesClientConfig {
 
-    @Value("${k8s.ca-cert-path}")
-    private String caCertPath;
+    @PostConstruct
+    public void init() throws Exception {
 
-    @Bean
-    public ApiClient apiClient() throws IOException {
-        ApiClient client = ClientBuilder.standard()
-                .setBasePath(masterUrl)
-                .setCertificateAuthority(new FileInputStream(caCertPath))
-                .setAuthentication(new AccessTokenAuthentication(token))
-                .build();
+        String proxyUrl = "http://<MASTER_IP>:8001";
 
+        ApiClient client = Config.fromUrl(proxyUrl);
+
+        client.setReadTimeout(0);
         Configuration.setDefaultApiClient(client);
-        return client;
     }
 }
 ```
 
-✅ TLS enabled
-✅ CA verified
-✅ Token authentication
-✅ Production-ready
+✔ No token
+✔ No SSL
+✔ No ca.crt
+✔ Pure HTTP
 
 ---
 
-# STEP 8️⃣ – Kubernetes Service Layer
+# 7️⃣ SERVICE – LIST PODS
 
 ### `KubernetesService.java`
 
 ```java
+package com.example.k8s.service;
+
+import io.kubernetes.client.openapi.apis.CoreV1Api;
+import io.kubernetes.client.openapi.models.V1Pod;
+import org.springframework.stereotype.Service;
+
 @Service
 public class KubernetesService {
 
-    public List<String> listPods(String namespace) throws ApiException {
-        CoreV1Api api = new CoreV1Api();
+    private final CoreV1Api api = new CoreV1Api();
 
-        return api.listNamespacedPod(
+    public void listPods(String namespace) throws Exception {
+        var pods = api.listNamespacedPod(
                 namespace,
                 null, null, null,
                 null, null,
-                null, null,
+                null, null, null,
                 null, null
-        ).getItems()
-         .stream()
-         .map(p -> p.getMetadata().getName())
-         .toList();
+        );
+
+        for (V1Pod pod : pods.getItems()) {
+            System.out.println("Pod: " + pod.getMetadata().getName());
+        }
     }
 }
 ```
 
 ---
 
-# STEP 9️⃣ – REST Controller
+# 8️⃣ CONTROLLER
 
-### `KubernetesController.java`
+### `K8sController.java`
 
 ```java
+package com.example.k8s.controller;
+
+import com.example.k8s.service.KubernetesService;
+import org.springframework.web.bind.annotation.*;
+
 @RestController
 @RequestMapping("/k8s")
-public class KubernetesController {
+public class K8sController {
 
     private final KubernetesService service;
 
-    public KubernetesController(KubernetesService service) {
+    public K8sController(KubernetesService service) {
         this.service = service;
     }
 
-    @GetMapping("/pods")
-    public List<String> pods() throws ApiException {
-        return service.listPods("default");
+    @GetMapping("/pods/{namespace}")
+    public String pods(@PathVariable String namespace) throws Exception {
+        service.listPods(namespace);
+        return "Pods fetched";
     }
 }
 ```
 
 ---
 
-# STEP 🔟 – Test END-TO-END
+# 9️⃣ TEST ENDPOINT
 
-### Curl test
-
-```bash
-curl http://localhost:8080/k8s/pods
-```
-
-### Expected Output
-
-```json
-[
-  "nginx-deployment-5d59d67564-abcde",
-  "spring-app-67c9d8f9d9-xys23"
-]
-```
-
----
-
-# 🔐 SECURITY CHECKLIST (IMPORTANT)
-
-✔ RBAC limited
-✔ TLS enabled
-✔ Token not hardcoded
-✔ No kubectl proxy
-✔ No `--insecure-skip-tls-verify`
-
----
-
-# ❌ WHAT NOT TO DO IN PRODUCTION
-
-❌ Disable SSL
-❌ Use admin kubeconfig
-❌ Expose 6443 publicly
-❌ Store token in git
-❌ Use root CA key
-
----
-
-# 🎯 NEXT LEVEL (Optional)
-
-If you want, I can help you add:
-
-1️⃣ Restart Pod / Deployment
-2️⃣ Scale Deployment
-3️⃣ Exec into Pod
-4️⃣ Namespace isolation
-5️⃣ UI dashboard
-6️⃣ Vault integration
-7️⃣ Token rotation
-
-Just tell me **what you want next** 🚀
-
-
-========
-
-If you **do NOT have `ca.crt`**, you still have **3 possible paths**.
-I’ll explain them **clearly + practically**, and tell you **which one is correct for production**.
-
----
-
-## 🔴 IMPORTANT FIRST
-
-For **PRODUCTION**, Kubernetes **ALWAYS uses HTTPS**.
-There is **no safe production setup without CA cert**.
-
-So if someone tells you *“you can do prod without ca.crt”* → ❌ **wrong**.
-
----
-
-# ✅ OPTION 1 (BEST & CORRECT) — **Extract CA cert (RECOMMENDED)**
-
-Even if you *think* you don’t have `ca.crt`, **Kubernetes ALWAYS has it**.
-
-### 🔹 Get it from kubeconfig (MOST COMMON)
-
-On **K8s master** or any node with kubectl:
-
-```bash
-kubectl config view --raw --minify --flatten \
--o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
-| base64 --decode > ca.crt
-```
-
-✔ Works in **99% cases**
-✔ This is **production-grade**
-
-Then copy `ca.crt` to your Spring Boot server.
-
----
-
-### 🔹 Use it in Spring Boot (FINAL & SAFE)
-
-```java
-ApiClient client = ClientBuilder.standard()
-        .setBasePath("https://MASTER_IP:6443")
-        .setCertificateAuthority(new FileInputStream("ca.crt"))
-        .setAuthentication(new AccessTokenAuthentication(token))
-        .build();
-```
-
-✅ DONE (This is how real companies do it)
-
----
-
-# 🟠 OPTION 2 — Disable TLS verification (TEMP / TESTING ONLY)
-
-If you **absolutely cannot get ca.crt right now**
-(use only for **testing**, **NOT production**)
-
-### ⚠️ SECURITY RISK
-
-* MITM possible
-* Credentials can be intercepted
-
----
-
-### Java code (INSECURE ❌)
-
-```java
-ApiClient client = Config.fromToken(
-        "https://MASTER_IP:6443",
-        token,
-        false   // ❌ disable SSL verification
-);
-
-Configuration.setDefaultApiClient(client);
-```
-
-### When is this OK?
-
-✔ Local testing
-✔ Internal lab
-❌ Production
-❌ Internet-facing cluster
-
----
-
-# 🟡 OPTION 3 — Use kubeconfig file (NO ca.crt needed manually)
-
-If your Spring Boot app can access **kubeconfig** file:
+From browser / Postman:
 
 ```
-~/.kube/config
+GET http://localhost:8080/k8s/pods/default
 ```
 
-Then **Java client auto-loads CA cert internally**.
+Logs:
 
----
-
-### Java code (AUTO MODE)
-
-```java
-ApiClient client = ClientBuilder.kubeconfig(
-        KubeConfig.loadKubeConfig(new FileReader("C:/Users/user/.kube/config"))
-).build();
-
-Configuration.setDefaultApiClient(client);
+```
+Pod: nginx-xxx
+Pod: redis-xxx
 ```
 
-✔ CA cert auto handled
-✔ Token auto handled
-✔ Very clean
-
-❌ Not ideal if app runs in server/container
+🎉 SUCCESS
 
 ---
 
-# 🔥 WHICH OPTION SHOULD YOU USE?
+# 🔐 WHY THIS WORKS WITHOUT SECURITY
 
-| Scenario             | Correct Option       |
-| -------------------- | -------------------- |
-| Local testing        | Option 2             |
-| Company internal lab | Option 2 (temporary) |
-| Production           | **Option 1 ONLY**    |
-| CI/CD server         | Option 1             |
-| Developer machine    | Option 3             |
+* `kubectl proxy`:
 
----
-
-# ❓ WHY KUBERNETES REQUIRES CA CERT
-
-Because:
-
-* Kubernetes API is **mutual TLS protected**
-* Prevents fake API servers
-* Prevents token leakage
-* Required by CNCF security standards
+  * Uses **your kubeconfig**
+  * Authenticates internally
+  * Exposes **safe HTTP endpoint**
+* Spring Boot never sees certificates
+* Ideal for **internal lab & testing**
 
 ---
 
-# ✅ FINAL RECOMMENDATION (CLEAR)
+# ❌ WHAT NOT TO DO
 
-> **If you don’t have `ca.crt`, extract it from kubeconfig.
-> There is NO production-safe alternative.**
+❌ Disable TLS in kube-apiserver
+❌ Expose 6443 directly via HTTP
+❌ Use `--insecure-port` (removed in new K8s)
 
 ---
 
-If you want, next I can show you:
+# 🧠 WHEN TO USE THIS SETUP
 
-* 🔁 How to **rotate token**
-* 🔒 How to **store token + cert in Vault**
-* 📦 How to **run Spring Boot inside Kubernetes**
-* ⚙️ How to **restart / scale deployments**
+✅ Internal company lab
+✅ POC tools
+✅ Automation testing
+✅ Training environments
 
-Just say the word 👍
+❌ Public network
+❌ Production clusters
 
+---
+
+# 🚀 NEXT STEPS (OPTIONAL)
+
+If you want, I can next show you how to:
+
+1️⃣ Execute kubectl commands
+2️⃣ Deploy YAML from Spring Boot
+3️⃣ Scale deployments
+4️⃣ Stream pod logs
+5️⃣ Add basic auth on kubectl proxy
+
+Just tell me 🔥
